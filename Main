@@ -1,1 +1,333 @@
+#include <algorithm>
+#include <bitset>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <unordered_map>
+#include <vector>
 
+using namespace std;
+
+struct MIPS {
+  int opcode, rs, rt, rd, shamt, funct; // R-type
+  int rsI, rtI, immI;                   // I-type
+  int opcodeJ, addressJ;                // J-type
+};
+
+struct RM {
+  unordered_map<string, int> registers; // Registers (name, integer)
+  unordered_map<int, int> memory;       // Memory (location, content)
+  vector<MIPS> instructions;            // Vector of MIPS instructions
+};
+
+// Parse the MIPS binary code and populate the 'instruction' struct accordingly
+// Example parsing logic for R-type instruction
+void parseRTypeInstruction(const string &binaryInstruction, MIPS &instruction) {
+  // Extract fields from the binary instruction
+  // Example: Assume opcode is bits 31-26, rs is bits 25-21, rt is bits 20-16,
+  // etc.
+  instruction.opcode = stoi(binaryInstruction.substr(0, 6), nullptr, 2);
+  instruction.rs = stoi(binaryInstruction.substr(6, 5), nullptr, 2);
+  instruction.rt = stoi(binaryInstruction.substr(11, 5), nullptr, 2);
+  instruction.rd = stoi(binaryInstruction.substr(16, 5), nullptr, 2);
+  instruction.shamt = stoi(binaryInstruction.substr(21, 5), nullptr, 2);
+  instruction.funct = stoi(binaryInstruction.substr(26, 6), nullptr, 2);
+}
+
+// Example parsing logic for I-type instruction
+void parseITypeInstruction(const string &binaryInstruction, MIPS &instruction) {
+  // Extract fields from the binary instruction
+  // Example: Assume opcode is bits 31-26, rs is bits 25-21, rt is bits 20-16,
+  // imm is bits 15-0, etc.
+  instruction.opcode = stoi(binaryInstruction.substr(0, 6), nullptr, 2);
+  instruction.rsI = stoi(binaryInstruction.substr(6, 5), nullptr, 2);
+  instruction.rtI = stoi(binaryInstruction.substr(11, 5), nullptr, 2);
+  instruction.immI = stoi(binaryInstruction.substr(16, 16), nullptr, 2);
+}
+
+// Function to parse MIPS binary code and populate the 'instruction' struct
+// based on its opcode
+void parseInstruction(const string &binaryInstruction, MIPS &instruction) {
+  int opcode = stoi(binaryInstruction.substr(0, 6), nullptr, 2);
+
+  if (opcode == 0b000000) {
+    parseRTypeInstruction(binaryInstruction, instruction);
+
+  } else {
+    parseITypeInstruction(binaryInstruction, instruction);
+
+  }
+}
+// Function to read the input file and populate the RM struct
+void ReadFile(const string &filename, RM &state) {
+  ifstream inputFile(filename);
+  string line;
+  for (int i = 0; i < 32; ++i) {
+    state.registers["R" + to_string(i)] = 0;
+  }
+  if (inputFile.is_open()) {
+    while (getline(inputFile, line) && line != "REGISTERS") {
+    } // Skip until "REGISTERS"
+    while (getline(inputFile, line) && line != "MEMORY") {
+      istringstream lineRead(line);
+      string regNum;
+      int regValue;
+      lineRead >> regNum >> regValue;
+      state.registers[regNum] = regValue;
+    }
+    // Read memory contents
+    while (getline(inputFile, line) && line != "CODE") {
+      istringstream lineRead(line);
+      int memLoc, memValue;
+      lineRead >> memLoc >> memValue;
+      state.memory[memLoc] = memValue;
+    }
+
+    // Read MIPS instructions
+    while (getline(inputFile, line)) {
+      MIPS instruction;
+
+      // Parse the MIPS binary code and populate the 'instruction' struct
+      // accordingly
+      parseInstruction(line, instruction);
+
+      // Once parsed, push the 'instruction' into the 'state.instructions'
+      state.instructions.push_back(instruction);
+    }
+  }
+}
+
+// Function to execute R-type MIPS instructions
+void executeRTypeInstruction(const MIPS &instr, RM &state) {
+  // Extract register names based on instruction fields
+  string rdName = "R" + to_string(instr.rd);
+  string rsName = "R" + to_string(instr.rs);
+  string rtName = "R" + to_string(instr.rt);
+
+  // Check if the registers exist in the state
+  if (state.registers.count(rdName) && state.registers.count(rsName) &&
+      state.registers.count(rtName)) {
+
+    // Perform operations based on the function code
+    switch (instr.funct) {
+    case 0b100000: // ADD
+
+      state.registers[rdName] =
+          state.registers[rsName] + state.registers[rtName];
+
+      break;
+    case 0b100010: // SUB
+      state.registers[rdName] =
+          state.registers[rsName] - state.registers[rtName];
+      break;
+    case 0b101010: // SLT
+      state.registers[rdName] =
+          (state.registers[rsName] < state.registers[rtName]) ? 1 : 0;
+      break;
+    // Add handling for other R-type instructions...
+    default:
+      cerr << "Error: Unsupported function code in R-type instruction." << endl;
+      break;
+    }
+  } else {
+    cerr << "Error: One of the registers in the R-type instruction does not "
+            "exist."
+         << endl;
+  }
+}
+
+// Function to execute I-type MIPS instructions
+void executeITypeInstruction2(const MIPS &instr, RM &state) {
+  // Extract register names based on instruction fields
+  string rtName = "R" + to_string(instr.rtI);
+  string rsName = "R" + to_string(instr.rsI);
+
+  // Debugging output to print register values before execution
+  cout << "Before Execution:" << endl;
+  cout << rtName << ": " << state.registers[rtName] << endl;
+  cout << rsName << ": " << state.registers[rsName] << endl;
+
+  // Check if the registers exist in the state
+  if (state.registers.count(rtName) && state.registers.count(rsName)) {
+    switch (instr.opcode) {
+    case 0b100011: // LW (Load Word)
+      state.registers[rtName] =
+          state.memory[state.registers[rsName] + instr.immI];
+      break;
+    case 0b101011: // SW (Store Word)
+      state.memory[state.registers[rsName] + instr.immI] =
+          state.registers[rtName];
+      break;
+    case 0b001000: // ADDI (Add Immediate)
+      state.registers[rtName] = state.registers[rsName] + instr.immI;
+      break;
+    default:
+      cerr << "Error: Unsupported opcode in I-type instruction." << endl;
+      break;
+    }
+
+    // Debugging output to print register values after execution
+    cout << "After Execution:" << endl;
+    cout << rtName << ": " << state.registers[rtName] << endl;
+    cout << rsName << ": " << state.registers[rsName] << endl;
+  } else {
+    cerr << "Error: One of the registers in the I-type instruction does not "
+            "exist."
+         << endl;
+  }
+}
+
+// Update the executeInstruction function to handle control-flow instructions
+void executeInstruction(const MIPS &instr, RM &state, ofstream &outputFile,
+                        size_t &pc, int &cycle, size_t &ic) {
+  // R-type instruction
+  if (instr.opcode == 0b000000) {
+    // Extract register names based on instruction fields
+    string rdName = "R" + to_string(instr.rd);
+    string rsName = "R" + to_string(instr.rs);
+    string rtName = "R" + to_string(instr.rt);
+
+    switch (instr.funct) {
+    case 0b100000: // ADD
+      state.registers[rdName] =
+          state.registers[rsName] + state.registers[rtName];
+      outputFile << "C#" << cycle++ << " I" << ic + 1 << "-WB" << endl;
+      break;
+    case 0b100010: // SUB
+      state.registers[rdName] =
+          state.registers[rsName] - state.registers[rtName];
+      outputFile << "C#" << cycle++ << " I" << ic + 1 << "-WB" << endl;
+      break;
+    case 0b101010: // SLT
+      state.registers[rdName] =
+          (state.registers[rsName] < state.registers[rtName]) ? 1 : 0;
+      outputFile << "C#" << cycle++ << " I" << ic + 1 << "-WB" << endl;
+      break;
+    // Add handling for other R-type instructions...
+    default:
+      cerr << "Error: Unsupported function code in R-type instruction." << endl;
+      break;
+    }
+  }
+  // I-type instruction
+  else {
+    // Extract register names based on instruction fields
+    string rtName = "R" + to_string(instr.rtI);
+    string rsName = "R" + to_string(instr.rsI);
+
+    switch (instr.opcode) {
+    case 0b100011: // LW (Load Word)
+      state.registers[rtName] =
+          state.memory[state.registers[rsName] + instr.immI / 4];
+      outputFile << "C#" << cycle++ << " I" << ic + 1 << "-MEM" << endl;
+      outputFile << "C#" << cycle++ << " I" << ic + 1 << "-WB" << endl;
+      break;
+    case 0b101011: // SW (Store Word)
+      state.memory[state.registers[rsName] + instr.immI / 4] =
+          state.registers[rtName];
+      outputFile << "C#" << cycle++ << " I" << ic + 1 << "-MEM" << endl;
+      break;
+    case 0b001000: // ADDI (Add Immediate)
+      state.registers[rtName] = state.registers[rsName] + instr.immI;
+      outputFile << "C#" << cycle++ << " I" << ic + 1 << "-WB" << endl;
+      break;
+    case 0b000100: // BEQ (Branch if Equal)
+      if (state.registers[rsName] == state.registers[rtName]) {
+        // Calculate the new PC value based on the branch offset
+        int offset = instr.immI; // Immediate is already sign-extended
+        pc += offset;
+      }
+      break;
+    case 0b000101: // BNE (Branch if Not Equal)
+      if (state.registers[rsName] != state.registers[rtName]) {
+        // Calculate the new PC value based on the branch offset
+        int offset = instr.immI; // Immediate is already sign-extended
+        pc += offset;
+      }
+      break;
+    default:
+      cerr << "Error: Unsupported opcode in I-type instruction." << endl;
+      break;
+    }
+  }
+  // Increment pc for non-branch instructions
+  pc++;
+}
+
+// Function to simulate the MIPS processor
+void simulateProcessor(const vector<MIPS> &instructions, RM &state,
+                       ofstream &outputFile) {
+  int cycle = 1;
+  size_t pc = 0;                     // program counter
+  size_t ic = 0;                     // instruction counter
+  while (pc < instructions.size()) { // Loop until the program counter reaches
+                                     // the end of instructions
+    const MIPS &instr = instructions[pc];
+
+    // Output timing information for each instruction
+    outputFile << "C#" << cycle++ << " I" << ic + 1 << "-IF" << endl;
+    outputFile << "C#" << cycle++ << " I" << ic + 1 << "-ID" << endl;
+    outputFile << "C#" << cycle++ << " I" << ic + 1 << "-EX" << endl;
+
+    executeInstruction(instr, state, outputFile, pc, cycle, ic);
+
+    ic++;
+  }
+  outputFile << "REGISTERS" << endl;
+  for (int i = 0; i < 32; i++) {
+    if (state.registers["R" + to_string(i)] != 0) {
+      outputFile << "R" + to_string(i) << " "
+                 << state.registers["R" + to_string(i)] << endl;
+    }
+  }
+  vector<size_t> memoryLocations;
+  outputFile << "MEMORY" << endl;
+  for (const auto &mem : state.memory) {
+    if (mem.second != 0) {
+      memoryLocations.push_back(mem.first);
+    }
+  }
+  sort(memoryLocations.begin(), memoryLocations.end());
+  for (const auto &mem : memoryLocations) {
+    outputFile << mem << " " << state.memory[mem] << endl;
+  }
+}
+
+int main() {
+  string inputFilename;
+  string outputFilename;
+  char runAgain;
+
+  do {
+      cout << "Enter the input file name: ";
+      cin >> inputFilename;
+
+      cout << "Enter the output file name: ";
+      cin >> outputFilename;
+      ofstream outputFile(outputFilename); // Open output file
+
+      if (!outputFile.is_open()) {
+          cerr << "Error: Unable to open output file." << endl;
+          return 1;
+      }
+      cout << "Output file opened successfully." << endl; // Debug message
+
+      RM state;
+      ReadFile(inputFilename, state);
+
+      // Simulate processor
+      simulateProcessor(state.instructions, state, outputFile);
+
+      // Close output file
+      outputFile.close();
+      cout << "Output file closed." << endl; // Debug message
+
+      cout << "Simulation completed successfully." << endl; // Debug message
+      // Prompt the user if they want to run the code again
+      cout << "Do you want to run the code again? (y/n): ";
+      cin >> runAgain;
+  } while (tolower(runAgain) == 'y');
+  cout << "Program ended." << endl;
+  return 0;
+}
